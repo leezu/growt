@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <functional>
 #include <limits>
+#include <exception>
 
 #ifndef ICPC
 #include <xmmintrin.h>
@@ -180,6 +181,7 @@ struct TAtomic
     template <class TFunctor>
     inline static bool execute(SimpleElement& that, SimpleElement&, const SimpleElement& desired, TFunctor f)
     {
+        throw std::runtime_error(".atomic unsupported for now.");
         f.atomic(that.data, desired.key, desired.data);
         return true;
     }
@@ -188,6 +190,7 @@ struct TAtomic
     inline static std::pair<typename SimpleElement::mapped_type, bool>
     execute(SimpleElement& that, SimpleElement&, F f, Types ... args)
     {
+        throw std::runtime_error(".atomic unsupported for now.");
         SimpleElement::mapped_type temp = f.atomic(that.data, std::forward<Types>(args)...);
         return std::make_pair(temp, true);
     }
@@ -202,10 +205,14 @@ struct TAtomic<false>
     inline static bool execute(SimpleElement& that, SimpleElement& exp, const SimpleElement& des, TFunctor f)
     {
         SimpleElement::mapped_type td = exp.data;
-        f(td, des.key, des.data);
-        return __sync_bool_compare_and_swap(&(that.data),
-                                            exp.data,
-                                            td);
+        bool update = f(td, des.key, des.data);
+        if (update) {
+          return __sync_bool_compare_and_swap(&(that.data),
+                                              exp.data,
+                                              td);
+        } else {
+          return true;
+        }
     }
 
     template <class F, class ...Types>
@@ -213,10 +220,13 @@ struct TAtomic<false>
     execute(SimpleElement& that, SimpleElement& exp, F f, Types ... args)
     {
         SimpleElement::mapped_type td = exp.data;
-        f(td, std::forward<Types>(args)...);
-        bool succ = __sync_bool_compare_and_swap(&(that.data),
-                                            exp.data,
-                                            td);
+        bool update = f(td, std::forward<Types>(args)...);
+        bool succ = true;
+        if (update) {
+          bool succ = __sync_bool_compare_and_swap(&(that.data),
+                                                   exp.data,
+                                                   td);
+        }
         return std::make_pair(td, succ);
     }
 };

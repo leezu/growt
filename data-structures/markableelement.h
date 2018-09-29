@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <functional>
 #include <limits>
+#include <exception>
 
 #include <xmmintrin.h>
 
@@ -194,9 +195,12 @@ inline bool MarkableElement::atomicUpdate(MarkableElement & expected,
                                           F f)
 {
     mapped_type td = expected.data;
-    f(td, desired.key, desired.data);
-    return CAS(expected, MarkableElement(desired.key, td));
-
+    bool update = f(td, desired.key, desired.data);
+    if (update) {
+      return CAS(expected, MarkableElement(desired.key, td));
+    } else {
+      return true;
+    }
 }
 
 template<class F>
@@ -204,7 +208,10 @@ inline bool MarkableElement::nonAtomicUpdate(MarkableElement &,
                                        const MarkableElement & desired,
                                              F f)
 {
-    f(data, desired.key, desired.data);
+    bool update = f(data, desired.key, desired.data);
+    if (!update) {
+      throw std::runtime_error("UpdateFunction may only cancel atomic updates.");
+    }
     return true;
 }
 
@@ -214,8 +221,12 @@ MarkableElement::atomicUpdate(MarkableElement &exp,
                               F f, Types&& ... args)
 {
     auto temp = exp.getData();
-    f(temp, std::forward<Types>(args)...);
-    return std::make_pair(temp, CAS(exp, MarkableElement(exp.key, temp)));
+    bool update = f(temp, std::forward<Types>(args)...);
+    bool success = true;
+    if (update) {
+      success = CAS(exp, MarkableElement(exp.key, temp));
+    }
+    return std::make_pair(temp, success);
 
 }
 
@@ -223,8 +234,11 @@ template<class F, class ...Types>
 inline std::pair<typename MarkableElement::mapped_type, bool>
 MarkableElement::nonAtomicUpdate(F f, Types&& ... args)
 {
-    return std::make_pair(f(data, std::forward<Types>(args)...),
-                          true);
+    bool update = f(data, std::forward<Types>(args)...);
+    if (!update) {
+      throw std::runtime_error("UpdateFunction may only cancel atomic updates.");
+    }
+    return std::make_pair(data, true);
 }
 
 }
